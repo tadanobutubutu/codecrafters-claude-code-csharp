@@ -111,66 +111,63 @@ while (requiresAction)
     {
         foreach (ChatToolCall toolCall in completion.ToolCalls)
         {
-            if (toolCall is ChatFunctionToolCall functionToolCall)
+            string functionName = toolCall.FunctionName;
+            string toolCallId = toolCall.Id;
+            string argumentsStr = toolCall.FunctionArguments.ToString();
+            
+            string result = "";
+            try
             {
-                string functionName = functionToolCall.FunctionName;
-                string toolCallId = functionToolCall.Id;
-                string argumentsStr = functionToolCall.FunctionArguments;
+                using JsonDocument doc = JsonDocument.Parse(argumentsStr);
+                JsonElement root = doc.RootElement;
                 
-                string result = "";
-                try
+                if (functionName == "Read")
                 {
-                    using JsonDocument doc = JsonDocument.Parse(argumentsStr);
-                    JsonElement root = doc.RootElement;
+                    string filePath = root.GetProperty("file_path").GetString()!;
+                    result = File.ReadAllText(filePath);
+                }
+                else if (functionName == "Write")
+                {
+                    string filePath = root.GetProperty("file_path").GetString()!;
+                    string content = root.GetProperty("content").GetString()!;
+                    string? dir = Path.GetDirectoryName(filePath);
+                    if (!string.IsNullOrEmpty(dir))
+                    {
+                        Directory.CreateDirectory(dir);
+                    }
+                    File.WriteAllText(filePath, content);
+                    result = $"Successfully wrote to {filePath}";
+                }
+                else if (functionName == "Bash")
+                {
+                    string command = root.GetProperty("command").GetString()!;
+                    using var process = new System.Diagnostics.Process();
+                    process.StartInfo.FileName = "bash";
+                    process.StartInfo.ArgumentList.Add("-c");
+                    process.StartInfo.ArgumentList.Add(command);
+                    process.StartInfo.RedirectStandardOutput = true;
+                    process.StartInfo.RedirectStandardError = true;
+                    process.StartInfo.UseShellExecute = false;
+                    process.StartInfo.CreateNoWindow = true;
+                    process.Start();
                     
-                    if (functionName == "Read")
+                    if (process.WaitForExit(30000))
                     {
-                        string filePath = root.GetProperty("file_path").GetString()!;
-                        result = File.ReadAllText(filePath);
+                        result = process.StandardOutput.ReadToEnd() + process.StandardError.ReadToEnd();
                     }
-                    else if (functionName == "Write")
+                    else
                     {
-                        string filePath = root.GetProperty("file_path").GetString()!;
-                        string content = root.GetProperty("content").GetString()!;
-                        string? dir = Path.GetDirectoryName(filePath);
-                        if (!string.IsNullOrEmpty(dir))
-                        {
-                            Directory.CreateDirectory(dir);
-                        }
-                        File.WriteAllText(filePath, content);
-                        result = $"Successfully wrote to {filePath}";
-                    }
-                    else if (functionName == "Bash")
-                    {
-                        string command = root.GetProperty("command").GetString()!;
-                        using var process = new System.Diagnostics.Process();
-                        process.StartInfo.FileName = "bash";
-                        process.StartInfo.ArgumentList.Add("-c");
-                        process.StartInfo.ArgumentList.Add(command);
-                        process.StartInfo.RedirectStandardOutput = true;
-                        process.StartInfo.RedirectStandardError = true;
-                        process.StartInfo.UseShellExecute = false;
-                        process.StartInfo.CreateNoWindow = true;
-                        process.Start();
-                        
-                        if (process.WaitForExit(30000))
-                        {
-                            result = process.StandardOutput.ReadToEnd() + process.StandardError.ReadToEnd();
-                        }
-                        else
-                        {
-                            process.Kill();
-                            result = "Error: Process timed out after 30 seconds";
-                        }
+                        process.Kill();
+                        result = "Error: Process timed out after 30 seconds";
                     }
                 }
-                catch (Exception e)
-                {
-                    result = $"Error: {e.Message}";
-                }
-                
-                messages.Add(new ToolChatMessage(toolCallId, result));
             }
+            catch (Exception e)
+            {
+                result = $"Error: {e.Message}";
+            }
+            
+            messages.Add(new ToolChatMessage(toolCallId, result));
         }
     }
     else
